@@ -1,0 +1,16 @@
+List of Resources
+
+American Statistical Association - source of subsetted data
+http://stat-computing.org/dataexpo/2009/the-data.html
+
+Bureau of Transportation Statists - original source of data
+https://www.bts.gov/ 
+
+OpenFlights - source for data sets about airports and carriers
+https://openflights.org/data.html
+
+ASA web page - source for carrier information
+http://stat-computing.org/dataexpo/2009/carriers.csv
+
+github user repository  - source of airport IATA codes, names, and variables
+https://raw.githubusercontent.com/datasets/airport-codes/master/data/airport-codes.csv

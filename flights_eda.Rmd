@@ -1,0 +1,1300 @@
+---
+title: Exploratory Analysis of US Flight Data (2008)
+output: html_document
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(data.table)
+library(dplyr)
+library(GGally)
+library(ggmap)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(gtable)
+library(mapdata)
+library(maps)
+library(pscl)
+library(psych)
+library(RColorBrewer)
+library(statsr)
+library(tidyr)
+
+
+# data <- read.csv('2008.csv')
+# flights <- data[sample(1:nrow(data), .1*nrow(data), replace=F),]
+# save(flights,file="flights.rda")
+load("flights.rda")
+```
+
+
+
+## Overview of Data Set
+
+The data set is an annual report of all flights originating or terminating within the United States  provided by the Bureau of Transportation Statistics. The data set meticulously details all aspects of each flight log and in the year 2008 (which will be the initial focus of the EDA) includes over 7 million observations. The data file used for this analysis was downloaded from American Statistical Association website where the full data set is divided into smaller files by year. 
+
+The data includes 29 variables for each observation, although with numerous missing values. The 2008 data set, the most recent available on the ASA site, was chosen because it had more complete data coverage and fewer missing values than some earlier data sets previewed.
+
+Because the file includes all flights for the given year, it could be argued that we are dealing with data for the full target 'population'. This would be the case if we were limiting our inquiry to 2008. Instead, though, we're going to take the data set for that particular year as the sample, ignoring for the time being any historical effects that might confound the generalizability of our fingings to data from other years. 
+
+Due to the size of the data set and to expedite analysis, we're going to take a random sample of the full set, working with just one-tenth of the observations. Not only will this make analysis more efficient but also give us the opportunity to test some of our results against the full data set.
+
+
+## Guiding Questions
+
+The questions that would guide our exploration of this data set depends foremost on who's interested in the final analysis. Decision makers at airlines, air travel safety officials, and frequent fliers would likely all find different variables of interest. To narrow the scope and sharpen the focus of our analysis we'll focus on the data from the passenger's point of view. Passengers are usually most directly effected and therefore concerned with delays and cancellations. Based on this fact we will proceed with the EDA guided by the following general question: **_What variables are associated with departure delays?_**
+
+As we progress with the EDA, we'll articulate and address other questions that arise. Ideally, our observations and analyses with lead to insights that can inform the travel-savvy airline passenger. Let's jump into the data by looking at variables that intuitively we'd suspect are associated with departure delays.
+
+
+## Univariate/Multivariate Analysis & Plots
+
+The volume of flights, well over 7 million, for one year is almost hard to iamgine, but at the same time provides a robust data source for reliable and accurate analysis even while using a random sample of only 10%. While there are 29 variables describing each flight, many of which are simply boolean dummy-variables for marking reasons for delays and cancelations and may not be relevant to our exploration. 
+
+As customers interested in either minimizing delays and cancellations or avoiding the headache of being stranded at an airport because we inadvertantly found ourselves in just conditions for a delay. Some of the factors that standout as worth investigating include: 
+
+* time-stamp variables (year, month, day, hour) - intuitively when we fly seems like a strong candidate contributor to delays. Anecdotely, holiday flights are notorious for delays. How does this play out statistically, though. _Are there months, days, or times of day that are more associated with delays or cancellations?_
+
+* carrier - some airlines are well-known for their reliability while others for the opposite. _Is there a significant association between airline carrier and delays and cancellations?_
+
+* origin/destination - a multitude of factors are involved here; airport design and age, climate, the number of runways among others make this a variable of interest. _Are there airports that are more reliably on-time all else being equal, and conversely, are there airports that are strongly associated with dealys all else being equal?_
+
+* distance - intuitively we'd think that a longer flight has more opportunities to be delayed. _Are the diatance of a flight and delays and cancellations associated?_
+
+Along with these variable will also rely heavily on the binary, categorical, and continuous variables that respectively encode whether a flight was delayed or cancelled, for what reason, and by how long.
+
+Let's start by looking at what will eventually serve as our primary dependent variable as we look around for correlations, departure delays.
+
+#### __Variable:__
+
+`DepDelay` - Departure delay in minutes, continuous numerical variable.
+
+#### __Intuition/Motivation:__
+
+The departure delay variable is the difference between the scheduled and actual departure times measured in minutes. My sense would be that departure delays are normally distributed around a mean some where around 45 minutes to an hour. I would also imagine that there would be a cut off or upper limit for delay times past which the flight would be reclassified as cancelled. First let's glance at the distribution of delay times.
+
+```{r distribution of delay times, warning=FALSE}
+# plot historgram of departure delay times
+ggplot(data=flights)+
+  geom_histogram(aes(x=DepDelay), stat='count', binwidth=5)
+```
+
+We'll definitely need to take a closer look at this variable as a few things stand out in our preliminary plot. First, it looks like there are outlier departure delay times that are forcing an exaggerated x-axis. Second, it appears that there are a substantial number of negative delay times. In fact the highest count is in a negative bin. And third, the plot returns a warning that a lot of values are excluded as non-finite (i.e NA's). Let's start with the NA values. I suspect these are actually on-time departures.
+
+```{r}
+# check for on-time value
+cat("Number of 0 values in `DepDelay` = ", sum(flights$DepDelay==0))
+cat("\nNumber of NA values in `DepDelay` = ", sum(is.na(flights$DepDelay)))
+```
+
+The range of values for the DepDelay variable should include a zero value, but as we can see there are none. Instead, our intuition appears to be correct that no value was assigned to this variable flights that departed on-time. 
+
+Next, let's address the extreme values, both the postive outliers that exaggerated the scale of our first plot and the abundant negative departure delays that skew the bulk of the distribution density into a negative range. We'll use a table get a better look at these extremes.
+
+```{r table of departure delay values}
+# transform NA's to 0's
+flights$DepDelay[is.na(flights$DepDelay)] = 0
+
+# abridge data removing central values
+delay_times <- flights$DepDelay[flights$DepDelay<0 | flights$DepDelay>600]
+
+# create count table and summary of departure delay values
+table(delay_times)
+
+```
+
+The negative delay values (i.e. >-20) suggest one half of a normal or exponential distribution. Let's quickly plot the values between -20 and 20 to see.
+
+```{r dsitribution close to zero delay time}
+ggplot(data=subset(flights, DepDelay>=-20 & DepDelay<=20))+
+  geom_histogram(aes(x=DepDelay), binwidth = 1)
+```
+
+The greatest density of delay values are actually less than but close to zero. Judging by the earlier table and this plot, we need to step back and more precisely define departure delay within the context of our data. The variable DepDelay is somewhat misleading in it's name and best redefined as the difference between actual and scheduled departures _including the negative integers_. 
+
+Considering everything and everyone involved in getting a flight off the ground, it would be unreasonable to define an on-time flight as coinciding exactly with a schedule. We'll define, instead, a symmetric range around zero of delays that we'll count as on-time. Assuming that a delay of fifteen minutes does not jeopordize flight connections or vacation itineraries, we'll define a flight departure as on-time if: -15<DepDelay<15.
+
+Now let's address the other values from the earlier table. Regarding the negative delay times, some of the lower values may be attributable to flights where all passengers were on board before the scheduled departure time. But the more extreme values warrent further investigation. Let's look at the full record for the observations with the most extreme negative values.
+
+```{r investigate negative delays extremes}
+#select observations with extreme neg delays
+delays_neg_extr <- flights[flights$DepDelay%in%c(-79,-71, -67, -64, -61),]
+
+delays_neg_extr
+```
+
+A couple of the flights look particularly short in duration suggesting a regional flight where punctuality might not be paramount. Investigating the Bureau of Transportation Statistics website, it appears the departure delay is calculated as the difference between the actual departure time and a scheduled departure time submitted before hand by the airlines, just as we had first defined it. This system might not take into account rescheduling close to departure time, perhaps explaining the extreme negative values. At any rate, we'll remove negative values less than -15 from the variable to clean the data up and facilitate analysis. This will only eliminate a small proprotion of the data.
+
+Regarding the extreme positive delays, some of the values are beyond what would reasonably be considered a delay instead of a cancellation. The most extreme value is actually close to a full 24hr day. At the same time the frequency of long delays (i.e. >600 mins) is low, usually at or near a single observation. We'll count these as outliers and define an upper limit to the variable, 15<DepDelay<480. 
+
+Let's take a look at our revised distribution.
+
+```{r rplot departure delay histogram}
+# remove observations with extreme delays
+flights.delays <-  flights[flights$DepDelay>=15 & flights$DepDelay<=480,]
+
+#check distributions
+summary(flights.delays$DepDelay)
+
+# plot revised data 
+ggplot(data=flights.delays)+
+  geom_histogram(aes(x=DepDelay), binwidth = 2)+
+  geom_vline(xintercept=mean(flights.delays$DepDelay), color='red', size=1)+
+  geom_vline(xintercept=median(flights.delays$DepDelay), color='green', size=1)+
+  scale_x_continuous(breaks=seq(0,480, 15))+
+  theme(axis.text.x = element_text(angle=90, hjust=1))
+
+```
+
+The distribution is exponential with exp<1.The red line represents the mean, the green the median. There are high frequencies of short delays decreasing in the right skewed distribution and trialing off with isolated delays of three or more hours. The mean and the median don't coincide in this case which isn't surprising with the pronounced right skew. The mean (~57mins) is appreciable in as much as it could imply a late arrival, a missed schedule or a foiled travel itinerary.
+
+Clarifying our definition of delay in this way raises several issues. In the plot above, for example, the on-time values are left out. If they were included both the mean and the median would be near 0. The naive assumption earlier was that `DepDelay` was a normally distributed continuous variable of values between 1 and some reasonable ceiling. Such a model would have greatly simplified our attempts to determine association. But since it isn't the case, we'll need to modify the data to meet our new definition. 
+
+One possibility would be to modify `DepDelay`, eliminate a considerable proportion of the data and focus solely on observations with a delay. But instead and at least initially, we'll create a new binary categorical variable `Delay` where any delay value falling within our defined delay range will have a value of 1. Any delays outside that range (or 0 values) will be assigned a 0. This will imply our working with proportions.
+
+```{r}
+# eliminate extreme positive  and negative outliers
+flights <- flights[flights$DepDelay>=-15 & flights$DepDelay<=480, ]
+
+# proportion of data remaining after eliminating outliers
+cat("Proportion of data remaining after elimination of outliers:\n", 
+    nrow(flights)/700972)
+
+# create new binary variable for departure delays
+flights$Delay <- ifelse(flights$DepDelay>15, 1, 0)
+```
+
+Even after removing the outliers we came away with well over 99% of the original data subset. Let's see how the proportion of flights with delays and without divides up.
+
+```{r}
+#calculate proportion of flights with delays
+cat("Proportion of flights with departure delays:\n",
+    sum(flights$Delay)/nrow(flights))
+```
+
+The proportion of flights that were delayed is surprising low. Perhaps more credit is due the airlines and the airline industry as a whole.
+
+Now that we have a better handle on this variable and we've created our categorical response variable, let's take a closer look at some of the variables that might explain the variation in departure delays.
+
+Let's start by addressing a group of obvious covariates of `Delay` and `DepDelay`, namely the five continuous numeric variables that divide the overall delay variables into subcategories based on the cause(s) of the delay. 
+
+
+#### __Variables:__
+
+`CarrierDelay`, `WeatherDelay`, `NASDelay`, `SecurityDelay`, `LateAircraftDelay`
+
+#### __Intuition/Motivation:__
+
+All of these variables measure in minutes their respective delay factor's contribution to overall delay. All of these variable will not be especially useful in our predictive model since they are covariates of the dependent variable we've already selected. Still, it's worth taking a look at how the distribution of the delay types to inform the selction of explanatory variables in our model.
+
+Flights that had any delay for any reason have all delay columns filled albeit with zero values. Flights that were on time have NA's
+
+```{r}
+# function for cleaning NA's and 0's
+clean_delay_data <-  function(x) {
+  cleaned = na.omit(flights[x])
+  cleaned = cleaned[cleaned != 0]
+  return(length(cleaned))
+}
+
+# apply clean function to delay factor variables
+delay_type_counts <- sapply(c('CarrierDelay', 'WeatherDelay', 'NASDelay', 
+         'SecurityDelay', 'LateAircraftDelay'), 
+       FUN=clean_delay_data, USE.NAMES=TRUE)
+
+delay_type_counts
+```
+
+```{r}
+# create data frame of delays and counts
+delay_data <- data.frame(names(delay_type_counts),delay_type_counts)
+
+# rename columns
+names(delay_data) <- c('names', 'count')
+
+# bar plot of delay cause frequencies
+ggplot(data=delay_data)+
+  geom_bar(aes(x=names, y=count), stat='identity')
+```
+
+
+
+Let's plot this data again so we can get an overall sense of the data proportionately.
+
+```{r}
+# calculate proportional data
+total_delays <- sum(delay_data$count)
+delay_data$prop <- delay_data$count/total_delays
+
+# assign temp dummy variables
+delay_data$dum_var <- c('Delays', 'Delays', 'Delays', 'Delays', 'Delays')
+
+# stacked bar plot of delay cause proportions
+ggplot(data=delay_data)+
+  geom_bar(aes(x=dum_var, y=prop, fill=names), stat='identity',
+           position = position_stack(reverse=TRUE))+
+  scale_y_continuous(breaks=seq(0,1,0.1), 
+                     labels=c("0%", "10%", "20%","30%", "40%", "50%",
+                              "60%", "70%", "80%", "90%", "100%"))+
+  scale_fill_brewer(type='qual', palette = 'Pastel1')+
+  coord_flip()
+
+```
+
+#### __Summary/Analysis:__
+
+The graph serves the purpose that a pie chart would by showing proportional data in a graphically accurate way, and it gives us some useful clues for answering our guiding questions and will be useful later when we group this same data by flight origin and destination.
+
+A remarkably small proportion of the flights are due to weather, even though these delays are the ones that are most prominant in media. It's likely that even the relatively small proportion of weather delays is under-represented because weather events cause especially widespread flight complications by seeding delays caused by late arrivals. `WeatherDelay` and `LateAircraftDelay` are likely closely related.
+
+Interestingly, this plot confirms our intuition about carriers being responsible for the delays. Depending on how you group the categories in the plot, carriers may be responsible for as much as 55% of delays. More conservatively, we could only place the blame for between a quarter and a third of delays.
+
+Let's look quickly at the five variables plotted together in another format.
+
+```{r, warning=FALSE}
+# line plot of monthly means for five delay types
+ggplot(data=flights)+
+  stat_summary(aes(x=Month, y=CarrierDelay), geom='line', fun.y='mean', color='red')+
+  stat_summary(aes(x=Month, y=WeatherDelay), geom='line', fun.y='mean', color='blue')+
+  stat_summary(aes(x=Month, y=NASDelay), geom='line', fun.y='mean', color='green')+
+  stat_summary(aes(x=Month, y=SecurityDelay), geom='line', fun.y='mean', color='purple')+
+  stat_summary(aes(x=Month, y=LateAircraftDelay), geom='line', fun.y='mean', color='orange')+
+  scale_x_discrete(limits=month.abb)
+  
+```
+
+#### __Summary/Analysis:__
+
+Where earlier we looked at counts and proportions of delays, here we've plotted the actual delay contribution in minutes for each delay type by month. Interestingly, The delays that are more frequent over all are on average also longer. The graph also shows an interesting multimodal distribution. This points to a seasonal influence on the length of delay even when accounting for delay type.
+
+
+* * *
+
+The first explanatory variable that stands out as a likely contributing factor to delays would be the time of year. We often hear of the holidays and the peak travel seasons of midsummer and late December as the most notorious for delays, an assumption that is often reinforced by news stories showing travelers stranded by delays and cancellations. We'll also posit as our starting hypothesis that if there is an association between season and delay frequency it is by extension associated with increased flight volume during peak travel seasons. Of course, our task is to go beyond anecdotely evidence and find statistical evidence within the data. 
+
+We'll start with the variable marking the month of each observation.
+
+#### __Variable:__ 
+
+`Month`
+
+#### __Intuition/Motivation:__ 
+
+We'll look at the volume of flights by month to see both if month is a predictor of delays and if the sheer volume of flights is itself a contributor. Based on what we know about our own individual patterns of flying certain times of year almost certainly see significantly higher flight volumes.
+
+```{r, warning=FALSE}
+# change Month from integer to categorical variable
+flights$Month_Name <- month.name[flights$Month]
+
+# histogram volume of flights by month
+ggplot(data=flights)+
+  geom_histogram(aes(x=Month_Name), stat='count')+
+  scale_x_discrete(limits=month.name)
+```
+
+#### __Summary/Analysis:__ 
+
+The bar plot doesn't show the kind of variation that we'd expected. Although the summer months show a higher volume of flights, the holiday months of November and December actually show slightly lower volumes, although within month variation may be closer to our intuited distribution (we'll look at this later). On the whole, the distribution even suggests that the volume of flights might not be the key factor behind perceived seasonal delays. 
+
+To be sure let's look closer at the statistics related to this variable.
+
+```{r}
+# count and proportional data for monthly flight volume
+flight.volume <- flights%>%
+  group_by(Month_Name)%>%
+  summarise(count=n(), 
+            prop_of_total=n()/nrow(flights))
+
+flight.volume
+
+# descriptive stats for flight volume by month
+summary(as.vector(table(flights$Month_Name)))
+cat("Standard deviation = ", sd(table(flights$Month_Name)))
+```
+
+Taking the standard deviation of 3536.04 for flight volume across months, let's look at whether the flight volumes are significantly off the mean.
+
+```{r warning=FALSE}
+# reshape data
+stds <- as.data.frame(table(flights$Month_Name))
+names(stds) <- c('Month', 'Volume')
+mean_vol_mnth <- mean(stds$Volume)
+stdd_vol_mnth <- sd(stds$Volume)
+
+# histogram volume of flights by month
+ggplot(data=stds)+
+  geom_bar(aes(x=Month, y=(Volume-mean_vol_mnth)/stdd_vol_mnth), 
+           stat='identity')+
+  geom_hline(yintercept=0, color='blue', size=1.0)+
+  geom_hline(yintercept=c(-2,-1, 1, 2), color='red', size=0.5, linetype=2)+
+  scale_x_discrete(labels=month.abb)+
+  scale_y_continuous(breaks=seq(-3, 2, 0.5), limits = c(-2.0, 2.0))
+```
+
+#### __Summary/Analysis:__
+
+Only four of the months deviate significantly from the mean and two of those, November and December, we intuited as having the highest flight volume because they include major holidays. Nonetheless, both of them have significantly lower than average number of flights. So far our intuition based on news reports of holiday travelers stranded at airports being attributable to higher flight volume isn't supported. 
+
+Although flight volume doesn't appear to be the cause behind perceived seasonal delays, are delays more common during vacation and holiday months? Let's control for differences in flight volume by looking at proportion of total flights delayed.
+
+```{r, echo=FALSE}
+# group and summarize delay data by month
+delay.month <- flights%>%
+  group_by(Month_Name)%>%
+  summarise(d_prop=sum(Delay)/n())
+
+delay.month
+
+#plot proportion of monthly flights that were delayed
+ggplot(data=delay.month)+
+  geom_bar(aes(x=Month_Name, y=d_prop), stat='identity')+
+  geom_hline(yintercept=mean(delay.month$d_prop), color='blue', size=1)+
+  scale_x_discrete(limits=month.name)+
+  theme(axis.text.x = element_text(angle=75, hjust=1))
+```
+
+#### __Summary/Analysis:__
+
+Where our initial focus on flight volume by month as the cause of delays failed to support an association between the variables of `Month` and `DepDelay`, the above plot seems to lend strong support to an association between `Month` and measures of delay. December and January, along with the summer months of June and July show higher than average flight delay proportions. But the plot may misrepresent the data to a small degree due to the narrow scale of the y-axis scale. To be sure the comparative differences aren't exaggerated let's correct the graph by adding standard deviation lines and then work with inferential tools to confirm that the difference is significant.
+
+```{r}
+# get stddev
+md.stddev <- c(rep(sd(delay.month$d_prop),4)*c(-2,-1,1,2))+
+             c(rep(mean(delay.month$d_prop), 4))
+
+# revise plot of proportion of delayed flights
+ggplot(data=delay.month)+
+  geom_bar(aes(x=Month_Name, y=d_prop), stat='identity')+
+  geom_hline(yintercept=mean(flights$Delay), color='blue', size=1)+
+  geom_hline(yintercept=md.stddev, color='red', size=0.8, linetype=2)+
+  scale_x_discrete(limits=month.name)+
+  theme(axis.text.x = element_text(angle=75, hjust=1))
+```
+
+This difference in proportion of delays still looks appreciable. Let's add statistical analysis to the plot to strengthen the argument that delays are associated with months. 
+
+We'll work with ch-square goodness-of-fit test to detect any statistically significant difference between any two of the months. We'll use the assume the uniform distribution with the mean monthly proportion as the expected distribution.
+
+```{r}
+# chi-square of proportion of flights delayed by month
+mn <- mean(delay.month$d_prop)
+chisqr <- sum((delay.month$d_prop-mn)**2)
+p_value <- pchisq(chisqr, 11, lower.tail = T)
+
+cat("Chi-squared:", chisqr)
+
+cat("\np-value:", p_value)
+```
+
+With a p-value well below our critical value of alpha=0.05, there is strong evidence within our data that the variation between proportion of delayed flights between months is beyond what we would expect by chance. There is an association between `Month` and `Delay`. 
+
+Before we add this to any predictive model that we create, let's look at a possible covariate that might be more strongly associated with departure delays, day of year.
+
+
+#### __Variable:__
+
+`DayofYear`
+
+#### __Intuition/Motivation:__
+
+This and our last variable address the same basic question: Does when you fly predict the likelihood of delays? In some sense what we're doing with this variable is putting our data into 365 bins, one for each day of the year, instead of twelve. This will bring out more variation and help to fine tune the association between calendar and delays.
+
+We'll need to create another categorical variable, `DayofYear`, with levels from 1-365 to facilitate binning the flight counts. The choice of a categorical variable is to increase the predictive power of any eventual regression model with this variable.
+
+```{r, warning=FALSE}
+# create array of cumulative days with breaks at the first of each month
+cum_days <- cumsum(c(1, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30))
+cum_days
+# assign new variable to data set
+flights$DayofYear <- cum_days[flights$Month] + flights$DayofMonth
+
+# change to categorical variable
+flights$DayofYear <- as.factor(flights$DayofYear)
+
+# plot of flight volume binned by cumulative day of year
+ggplot(data=flights)+
+  geom_histogram(aes(x=DayofYear), stat='count')+
+  labs(title='Flight Volume bins=365', x='', y='No. of Flights')+
+  scale_x_discrete(breaks=cum_days, labels=month.abb)+
+  theme(axis.text.x = element_text(angle=90))
+```
+
+#### __Summary/Analysis:__
+
+The first thing that stands out is the anamolous spike near the left side of the plot. As it turns out this spike is on day 60, which normally corresponds to March 1st, but it turns out that 2008 is a leap year, a fact we overlooked. So the 60th day is actually Feb 29th in this data set. The cumulative array we used to build our graph didn't account for the additional day.
+
+Let's adjusting the array and re-plotting the data before continuing.
+
+```{r, warning=FALSE}
+# revise array of cumulative days array
+cum_days_revised <- cumsum(c(0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30))
+
+# recalculate variable
+flights$DayofYear <- cum_days_revised[flights$Month] + flights$DayofMonth
+
+# plot of flight volume binned by cumulative day of year
+ggplot(data=flights)+
+  geom_histogram(aes(x=DayofYear), stat='count')+
+  labs(title='Flight Volume bins=366', x='', y='No. of Flights')+
+  scale_x_continuous(breaks=seq(1,360,30), labels=month.abb)
+```
+
+#### __Summary/Analysis:__
+
+Correcting for a leap year, the outlier disappears and we have a better plot to analyze. 
+Again the overall distribution at first glance looks fairly uniform, but a closer looks shows all kinds of patterned variation that look like they might be attributable to days of the week and the beginning or end of a month.  While the highest values don't show extreme variation, there are minima that stand out. 
+
+Let's add plot lines for delay counts.
+
+
+```{r, warning=FALSE}
+# plots of flight volume by day of year and proportion of delays
+p1 <- ggplot(data=flights)+
+  geom_histogram(aes(x=DayofYear), stat='count')+
+  scale_x_continuous(breaks=cum_days, labels=month.abb)
+
+p2 <- ggplot()+
+  geom_line(data=subset(flights, Delay==1), aes(x=DayofYear), color='orange', 
+            stat='count')+
+  geom_smooth() +
+  scale_x_continuous(breaks=cum_days, labels=month.abb)
+
+grid.arrange(p1, p2, ncol=1)
+```
+
+#### __Summary/Analysis:__
+
+Even without using proportional data to control for differences in flight volume the delay counts by day confirms our intuition that delays are seasonal and apparently closely associated with specific holidays. For example the days leading up to Christmas show disproportionately high dealys and the summer months, though not showing the spikes that December does, still show consitently higher delay counts than autumn months. The high variability in delays counts during spring months warrents further investigation.
+
+Let's look at this from another graphical angle.
+
+```{r}
+# group and summarize delay data by day of year
+delay.day <- flights%>%
+  group_by(DayofYear)%>%
+  summarise(d_prop=sum(Delay)/n())
+
+# get stddev
+md.stddev <- c(rep(sd(delay.day$d_prop),4)*c(-2,-1,1,2))+
+             c(rep(mean(delay.day$d_prop), 4))
+
+# plot of proportion of delayed flights
+ggplot(data=delay.day)+
+  geom_bar(aes(x=DayofYear, y=d_prop), stat='identity')+
+  geom_hline(yintercept=mean(delay.day$d_prop), color='blue', size=1)+
+  geom_hline(yintercept=md.stddev, color='red', size=0.25, linetype=2)+
+  scale_x_continuous(breaks=seq(1,360,30), labels=month.abb)+
+  theme(axis.text.x = element_text(angle=75, hjust=1))
+```
+
+#### __Summary/Analysis:__ 
+
+The results are unequivocal even before we have conducted inference - there is a clear association between `DayofYear` and `DepDelay`. The results bolster the anecdotal evidence that holidays are particularly fraught with delays but our analysis has at the same time been counterintuitive dispelling the notion that the delays are attributable to increased flight volume.
+
+As a variable for a predictive model this variable likely is highly explanatory of variation in delay proportion. Nonetheless, proportional data conceals total flight counts for each day. Days with low flight volumes but coincidently for this particular data set have a large number of delays would not be reliable preditors outside of this data set. Using `Month` in place of `DayofYear` might be less accurate cut might be more generalizable. Let's glance at the summary of flight volume by day to aid or decision.
+
+```{r}
+# summary stats of daily flight volume
+flight.volume_day <- flights%>%
+  group_by(DayofYear)%>%
+  summarise(count=n())
+
+summary(flight.volume_day$count)
+```
+
+Based on the summary stats and the earlier related plots, it's safe to assume that, because each day has at least 1237 flights, the proportion of delayed flights converges on an actual population proprotion. `DayofYear` will likely be a very strong predictor and have a very high R-squared value.
+
+Now let's zoom in on the latter part of the year where some of the most pronounced minima are and try to answer the question: What explains the variation across the individual days of the year? What explains some of the extreme minima?
+
+
+```{r, warning=FALSE}
+# subset and plot select range 
+ggplot(data=subset(flights, DayofYear>335))+
+  geom_histogram(aes(x=DayofYear), stat='count')+
+  labs(title="Flight Volume by Day in December", x="Date in December")+
+  scale_x_discrete(limits=336:366, labels=as.character(1:31))
+```
+
+#### __Summary/Analysis:__ 
+
+Taking a closer look at the distribution of December, we can see that there are significantly fewer flights on national holidays, days 358 and 364 (leap year) correpond to Christmas and New Year's Eve respectively. Otherwise their are small dips that on Sundays and Mondays of each week.
+
+Again, there's a roughly patterned variation in the flight volume. As we've found evidence against flight volume being associated with delays, we won't linger on this plot. Instead, let's follow the same series of steps we did with `Month` to calculate the proprotion of delayed flights by day.
+
+```{r, warning=FALSE}
+# log() of flight volume by day for December with delay proportions
+ggplot()+
+  geom_histogram(data=subset(flights, DayofYear>335), aes(x=DayofYear), 
+                 color='#A9A9A9', fill='#DCDCDC', stat='count')+
+  geom_line(data=subset(flights, DayofYear>335 & Delay==1), aes(x=DayofYear), 
+            size=1.5, color='orange', stat='count')+
+  labs(title="Flight (bars) and Delay (line) Volumes for December",
+       x="Data in December",
+       y="log(count)")+
+  scale_x_discrete(limits=336:366, labels=as.character(1:31))+
+  scale_y_continuous(tran='log10')
+```
+
+#### __Summary/Analysis:__ 
+
+Again, while delays associated closely with time stamp factors, flight volume appears to be independent of delays.
+
+Let's move away from time variable and now look at how airline carriers associate with delays.
+
+#### __Variable:__
+
+`UniqueCarrier`
+
+#### __Intuition/Motivation:__
+
+Most carriers have reputations for either being on-time and dependable or notoriously unreliable. Let's start by examining the distribution of flights by carrier to see which are the most popular. 
+
+
+```{r}
+carrier_count <- flights%>%
+  group_by(UniqueCarrier)%>%
+  summarise(count=n())
+
+carrier_count
+summary(carrier_count$count)
+```
+
+The range of flight volumes is enormous. But what does this say about an airline? Is `UniqueCarrier` indicative of reliability as measured by frequency of delays?
+
+First, we'll get some additional information about airlines and add it to our data frame. Then we'll compare the volume of flights across carriers.
+
+```{r, warning=FALSE}
+# additional data set with full carrier name
+carriers_index <- read.csv('carriers.csv', header=FALSE)
+colnames(carriers_index) <- c('UniqueCarrier', 'CarrierName')
+included_carriers <- as.vector(unique(flights$UniqueCarrier))
+carriers_index <- subset(carriers_index, UniqueCarrier %in% included_carriers)
+
+# manually set CarrierName to abbreviated format
+carriers_index['CarrierName'] <- c('Pinnacle', 'American', 'Aloha', 'Alaska', 
+                                   'JetBlue', 'Continental', 'Delta', 
+                                   'Atlantic SW', 'Frontier', 'AirTran', 
+                                   'Hawaiian', 'Amer Eagle', 'Northwest',
+                                   'Comair', 'Skywest', 'United', 'US Airways', 
+                                   'Southwest', 'ExpressJet', 'Mesa')
+
+# add column with full carrier name to data frame
+flights <- merge(flights, carriers_index)
+
+# plot of flight volume distribution by carrier
+ggplot(data=flights)+
+  geom_histogram(aes(x=UniqueCarrier), stat='count')+
+  scale_x_discrete(labels = as.vector(carriers_index$CarrierName))+
+  theme(axis.text.x = element_text(angle=75, hjust=1))
+
+```
+
+The variation in volume is considerable, so we'll again use proportional delay data to compensate for this.
+
+```{r}
+# group and summarize delay data by day of year
+delay.carrier <- flights%>%
+  group_by(UniqueCarrier)%>%
+  summarise(d_prop=sum(Delay)/n())
+
+# get stddev
+md.stddev <- c(rep(sd(delay.carrier$d_prop),4)*c(-2,-1,1,2))+
+             c(rep(mean(delay.carrier$d_prop), 4))
+
+# plot of proportion of delayed flights
+ggplot(data=delay.carrier)+
+  geom_bar(aes(x=UniqueCarrier, y=d_prop), stat='identity')+
+  geom_hline(yintercept=mean(delay.carrier$d_prop), color='blue', size=1)+
+  geom_hline(yintercept=md.stddev, color='red', size=0.25, linetype=2)+
+  scale_x_discrete(labels = as.vector(carriers_index$CarrierName))+
+  theme(axis.text.x = element_text(angle=75, hjust=1))
+```
+
+#### __Summary/Analysis:__ 
+
+The variation is minimal and the delay proportion for only two carriers are statistically significant. Referring to the plot of flight volumes, we can see both of these carriers had very low numbers of flights for 2008. They are also both minor airlines that most travelers either aren't familiar with or which they only fly occasionally. So they don't become leverage points in our predictive model and represent only a small portion of our full data set, we'll eliminate them from the analysis before performing inferential analysis.
+
+```{r}
+# eliminate obscure and low volume carriers
+flights <- flights[flights$CarrierName!="Aloha" & 
+                   flights$CarrierName!="Hawaiian",]
+
+table(flights$CarrierName)
+
+# group and summarize delay data by day of year
+delay.carrier <- flights%>%
+  group_by(UniqueCarrier)%>%
+  summarise(d_prop=sum(Delay)/n())
+
+```
+
+With this more robust version of our data set, we can test for a significant association between `UniqueCarrier` and `Delay`, using a chi-square test.
+
+```{r}
+# chi-square of proportion of flights delayed by carrier
+mn <- mean(delay.carrier$d_prop)
+chisqr <- sum((delay.carrier$d_prop-mn)**2)
+p_value <- pchisq(chisqr, 11, lower.tail = T)
+
+cat("Chi-squared:", chisqr)
+cat("\np-value:", p_value)
+```
+
+
+Before moving to another variable let's look at how our previous examination of the association between `Month` and `Delay` proportion changes when we add the `UniqueCarrier` variable.
+
+```{r}
+# gather and group proportions by month and carrier
+delay.month_carrier <- flights%>%
+  group_by(Month, CarrierName)%>%
+  summarise(d_prop=sum(Delay)/n())
+
+# plot of montly delay proportions faceted around carrier
+ggplot(data=delay.month_carrier)+
+  geom_point(aes(x=Month, y=d_prop))+
+  scale_x_discrete(limits=month.abb)+
+  scale_y_continuous(limits=c(0, 0.4))+
+  theme(axis.text.x = element_text(angle=75, hjust=1))+
+  facet_wrap(~CarrierName, ncol = 4)
+```
+
+#### __Summary/Analysis:__ 
+
+The faceted plot reveals an interesting pattern - the proportion of delays by month forms a wave like variation that is consistent across carriers. Recall that it is the same pattern we saw in the bivariate analysis of delays by month with peaks in the early months of the year, in summer and again in December. We saw a roughly similar distribution when we looked at `DayofYear`. 
+
+This similarity suggest that the time of year of a flight is more predictive than the carrier. There are some airlines that appear to have lower delay proportions than others (e.g. US Airways vs Continental), but the plot, because it squeezes so many plots into a small space, sacrifices the detail we need to see if their is significant variation across carrier by month. 
+
+Let's try another plotting strategy to see if `CarrierName` explains a significant proportion of the variation in delays proportions beyond what is associated with `Month` .
+
+To do this we'll split the carriers into three groups by volume of flights. Then we'll create a summary function to help with plotting means and SE intervals. After which, we'll plot delay proportions by month of the large volume carriers first.
+
+```{r}
+# get counts, mean, median volumes
+flights.volume_carrier <- flights%>%
+  group_by(CarrierName)%>%
+  summarise(volume=n())
+
+top_carrier_vol <- quantile(flights.volume_carrier$volume, 0.67) 
+mid_carrier_vol <- quantile(flights.volume_carrier$volume, 0.34)
+```
+
+
+
+```{r}
+# function for calculating SE for ribbon plots
+mean_2se <- function(x, mult = 2) {  
+  se <- mult * sqrt(var(x) / length(x))
+  mean <- mean(x)
+  data.frame(y = mean, ymin = mean - se, ymax = mean + se)
+}
+```
+
+
+
+```{r}
+# plot of delay proportions by month by large carriers
+## large carriers
+lg_crs <- subset(delay.month_carrier, 
+                 CarrierName%in%
+                 flights.volume_carrier
+                 [flights.volume_carrier$volume>=top_carrier_vol,]$CarrierName)
+
+ggplot(data=lg_crs, aes(x=Month, y=d_prop))+
+  geom_line(aes(color=CarrierName))+
+  geom_line(stat='summary', fun.y='mean', size=1, color='black', linetype=2)+
+  geom_ribbon(stat='summary', fun.data=mean_2se, alpha=0.3)+
+  geom_hline(yintercept=mean(lg_crs$d_prop), color='red', linetype=3)+
+  scale_x_discrete(limits=month.abb)+
+  labs(title="Delay Proportions High-Volume Carriers",
+       x="Month", y="Proportion of Flights Delayed")+
+  theme(plot.title = element_text(hjust=0.5, size=16))
+```
+
+#### __Summary/Analysis:__ 
+
+There are only a couple large-volume airlines that consistently fall outside a 95% confidence interval for the mean delay proportion. This suggests that `CarrierName` might not be a positive but not strong predictor beyond what is explained by `Month` or `DayofYear`. Let's first look at medium- and low-volume carriers before we conclude this, though.
+
+
+```{r}
+## medium carriers
+mid_crs <- subset(delay.month_carrier,
+                  CarrierName%in%
+                  flights.volume_carrier
+                  [flights.volume_carrier$volume>=mid_carrier_vol &
+                  flights.volume_carrier$volume<top_carrier_vol,]$CarrierName)
+
+ggplot(data=mid_crs, aes(x=Month, y=d_prop))+
+  geom_line(aes(color=CarrierName))+
+  geom_line(stat='summary', fun.y='mean', size=1, color='black', linetype=2)+
+  geom_ribbon(stat='summary', fun.data=mean_2se, alpha=0.3)+ 
+  geom_hline(yintercept=mean(mid_crs$d_prop), color='red', linetype=3)+
+  scale_x_discrete(limits=month.abb)+
+  labs(title="Delay Proportions Medium-Volume Carriers",
+       x="Month", y="Proportion of Flights Delayed")+
+  theme(plot.title = element_text(hjust=0.5, size=16))
+```
+
+#### __Summary/Analysis:__ 
+
+Again, the same situation, there are a couple of airlines that consistently have proportions beyond two SE from the mean.
+
+```{r}
+## small carriers
+sm_crs <- subset(delay.month_carrier, CarrierName%in%flights.volume_carrier[flights.volume_carrier$volume>=0 &
+                                       flights.volume_carrier$volume<mid_carrier_vol,]$CarrierName)
+
+ggplot(data=sm_crs, aes(x=Month, y=d_prop))+
+  geom_line(aes(color=CarrierName))+
+  geom_line(stat='summary', fun.y='mean', size=1, color='black', linetype=2)+
+  geom_ribbon(stat='summary', fun.data=mean_2se, alpha=0.3)+
+  geom_hline(yintercept=mean(sm_crs$d_prop), color='red', linetype=3)+
+  scale_x_discrete(limits=month.abb)+
+  labs(title="Delay Proportions Low-Volume Carriers",
+       x="Month", y="Proportion of Flights Delayed")+
+  theme(plot.title = element_text(hjust=0.5, size=16))
+
+```
+
+#### __Summary/Analysis:__ 
+
+It appears there are airlines with consistently high and low values in all three of our groupings. Since the total number of carriers is low it may still be worth including this variable in our predictive model, even though most of the monthly variation for most carriers falls within an expected range.
+
+Next let's look at the airport flights leave from for an association with `Delay`.
+
+#### __Variable:__
+
+`Origin` - Airport of Departure
+
+#### __Intuition/Motivation:__
+
+I would expect this variable to be highly associated with departure delays because it would be a covariate for other factors like weather and late aircraft. Also, I would expect for the variation in delays by airport to be very wide. There are many potential reasons for this, such as the number of runways, quality of infrastructure and the design of the airport among others. 
+
+Before beginning this EDA I would have further expected the location of an airport probably to have a big influence on delay frequency. The extreme weather of higher latitudes wold mean more flight delays, went my initial thinking. But we've alread seen that weather delays represent the smalles proportion of delays. 
+
+Judging by the delay factors we investigated I would suspect large airports that serve as tranfer hubs to have the highest delay rate because they would be most suseptable to late aircraft delays.
+
+Let's start by taking a look at the relative distributions of flight volume by airport.
+
+```{r, warning=FALSE}
+# plot of flight volume by departure airport
+ggplot(data=flights)+
+  geom_histogram(aes(x=Origin), stat='count')+
+  labs(x="Airports")+
+  theme(axis.text.x = element_blank())
+```
+
+#### __Summary/Analysis:__
+
+The names of the airports have been left off the x-axis because there are simply too many to include them legibly.
+
+Clearly the distribution of flight volume is very wide. Some of the values look like potential outliers, especially those at or near 0, but it's difficult to distinguish a lot of detail. Let's narrow the range of our variable. Many of the airports look to have relatively low or even insignificant numbers of flights. Let's look at the descriptive stats.
+
+```{r}
+# table of volumes by airport
+table(flights$Origin)
+
+# summary of volumes
+flights.volume_origin <- flights%>%
+  group_by(Origin)%>%
+  summarise(volume=n())
+
+summary(flights.volume_origin$volume)
+```
+
+There are airports that saw as few as a single flight in all of 2008. Later we'll see that this is due to the data set including a wide range of airport sizes and types, including heliports. This data isn't presently part of our data set, but we'll research further and add it. Let's also double check on the max volume value of 41480 to make sure it's reasonable.
+
+```{r}
+# investigate possible outlier
+subset(flights.volume_origin, volume==41408)
+
+```
+
+The airport code ATL corresponds to Atlanta Hartfield-Jackson airport. According to the airport [website](http://www.atl.com/about-atl/atl-factsheet/), the airport sees about 2,500 arrivals and departures a day. If we assume that half of those are departures and multiple by 365 we get 456250 a number that makes the 2008 departure volume look like anything but an outlier. Backing this up is the [Bureau of Tansportation Statistics](https://www.rita.dot.gov/bts/sites/default/files/rita_archives/bts_press_releases/2009/bts019_09/html/bts019_09.html) (the source for our data set) which lists ATL as the busiest airport in the US.
+
+To aid us in our focused exploration of airports in the flight data, let's call upon some additional data sources that make some of the details on each airport included in `flights` more accessible.
+
+```{r}
+# get list of 3-character airport codes from 'flights'
+airport_codes_origin <- unique(flights$Origin)
+airport_codes_dest <-  unique(flights$Dest)
+
+# load airport data file, very large file of nearly all airports in world
+airports <- read.csv('airport-codes.csv')
+
+# subset 'airports' to only those within contiguous United States
+airports <- subset(airports, iso_country=='US' & 
+                   !(iso_region %in% c('US-AK', 'US-HI')))
+
+# subset 'airports' for airports included in 'flights'
+origin_airports <- subset(airports, local_code %in% airport_codes_origin)
+
+#split 'coordinates' variable into latitude and longitude for plotting
+origin_airports <- separate(origin_airports, coordinates, into=c('lat','long'), 
+                            sep=', ', convert = TRUE)
+names(origin_airports)
+
+# select pertinant variables
+origin_airports <- origin_airports[,c('type', 'name', 'lat', 'long', 
+                                      'elevation_ft', 'iata_code')]
+
+
+# join aiport data to flights data set
+names(origin_airports)[6] <- "Origin"
+flights <- merge(flights, origin_airports, by="Origin")
+
+```
+
+Merging the airport data to our flights data set not only makes it easier to correlate the three-letter IATA abbreviations used in our data set and commonly seen on airline tickets, but adds several powerful variables to our data. The first new variable we'll harness is `type`. Let's look at the levels of this categorical variable to see how it can help us.
+
+```{r}
+# levels and their counts for `type`
+table(flights$type)
+```
+
+
+
+The variable divides our departure airport data neatly into groups based on size. At the same time this is complicated by over 10833 observations from a closed airport. This probably arised because our flight data is from 2008 and the airport data we aggregrated is newer. Let's investigate the closed airport observations before deciding how to handle them.
+
+
+
+```{r}
+# group and summarize data by airport size and name
+head(flights[flights$type=="closed",], 5)
+
+```
+
+One of the closed airport is listed as "seattle airport". There isn't actually an airport by that name, and strangley it has the same IATA abbreviation, "SEA", as Seattle-Tacoma Airport one of the busiest airports in the country. Let's use the IATA code to see if Seattle-Tacoma is accounted for in the data set.
+
+```{r}
+# SEA-TAC check
+head(flights[flights$Origin=="SEA",])
+```
+
+The problem with the closed airport count derives from the entries for Seattle-Tacoma being duplicated using an airport name that was classified as closed. Let's remove all the flight records for "seattle airport".
+
+```{r}
+# remove duplicate SEA-TAC entries
+flights <- flights[flights$name!="seattle airport",]
+```
+
+Let's look again at the table of counts for each type of airport.
+
+```{r}
+# count table of aiport types
+table(flights$type)
+```
+
+We're fortunate, the SEA anomoly accounted for all of the closed airport observations. This leaves our data neatly divided into three groups by airport size. We can use this to break up our previous plot into smaller, more manageable plots. This time instead of plotting flight volume we'll go directly to working with delay proportions.
+
+```{r}
+# subset, group and summarize data for large airports
+lg_airports <- flights[flights$type=="large_airport",]%>%
+  group_by(name)%>%
+  summarise(volume=n(), delays=sum(Delay), d_prop=mean(Delay), 
+            SE2=2*sqrt(mean(Delay))/n(), lwr=d_prop-SE2, upr=d_prop+SE2)
+
+
+# calculate mean and SE
+lgap_mean <- mean(lg_airports$d_prop)
+lgap_SE2 <- 2 * sqrt(var(lg_airports$d_prop)/length(lg_airports))
+
+# plot of delays by aiport for large airports
+ggplot(data=lg_airports)+
+  geom_bar(aes(x=name, y=d_prop), stat='identity')+
+  geom_hline(aes(yintercept=lgap_mean), size=1, color='black', linetype=2)+
+  geom_hline(yintercept=c(lgap_mean-lgap_SE2, lgap_mean+lgap_SE2), 
+             color='red', linetype=2)+
+  labs(x="Airports")
+  theme(axis.text.x = element_blank())
+
+```
+
+#### __Summary/Analysis:__
+
+Here we have decided to leave the airport names off the x-axis for reasons of legibility.
+
+There several airports that have signficantly high or low delay rates. `UniqueCarrier` is probably highly associated with delay proportions, at least in the case of large airports. Let's see which airports had values more than two SE's away from the mean.
+
+```{r}
+# subset data for extreme values
+lg_airports[lg_airports$d_prop>(lgap_mean + lgap_SE2), ]$name
+```
+
+Most of the airports that have statistically significant delay proportions are indeed recognizable as large transfer hubs.
+
+Let's also look at medium and small airports. I'd suspect there to be fewer proportions significantly greater than the mean since these airports would see fewer transfers and thus fewer late aircraft delays.
+
+```{r}
+# subset, group and summarize data for medium airports
+med_airports <- flights[flights$type=="medium_airport",]%>%
+  group_by(name)%>%
+  summarise(volume=n(), delays=sum(Delay), d_prop=mean(Delay), 
+            SE2=2*sqrt(mean(Delay))/n(), lwr=d_prop-SE2, upr=d_prop+SE2)
+
+
+# calculate mean and SE
+medap_mean <- mean(med_airports$d_prop)
+medap_SE2 <- 2 * sqrt(var(med_airports$d_prop)/length(med_airports))
+
+# plot of delays by aiport for large airports
+ggplot(data=med_airports)+
+  geom_bar(aes(x=name, y=d_prop), stat='identity')+
+  geom_hline(aes(yintercept=medap_mean), size=1, color='black', linetype=2)+
+  geom_hline(yintercept=c(medap_mean-medap_SE2, medap_mean+medap_SE2), 
+             color='red', linetype=2)+
+  labs(x="Airports")+
+  theme(axis.text.x = element_blank())
+
+```
+
+#### __Summary/Analysis:__
+
+Again the names have been left off to make the plot legible.
+
+Medium airports have a lower overall mean delay proportion than large airports but there are also in this set several example of airports with high delay rates. Let's see if any stand out as recognizable transfer hubs.
+
+
+```{r}
+# subset data for extreme values
+med_airports[med_airports$d_prop>(medap_mean+medap_SE2),]$name
+```
+
+None of these standout as airports that as transfer points would expect high late aircraft delay rates.
+
+Now for small airports.
+
+```{r}
+# subset, group and summarize data for medium airports
+sm_airports <- flights[flights$type=="small_airport",]%>%
+  group_by(name)%>%
+  summarise(volume=n(), delays=sum(Delay), d_prop=mean(Delay), 
+            SE2=2*sqrt(mean(Delay))/n(), lwr=d_prop-SE2, upr=d_prop+SE2)
+
+
+# calculate mean and SE
+smap_mean <- mean(sm_airports$d_prop)
+smap_SE2 <- 2 * sqrt(var(sm_airports$d_prop)/length(sm_airports))
+
+# plot of delays by aiport for large airports
+ggplot(data=sm_airports)+
+  geom_bar(aes(x=name, y=d_prop), stat='identity')+
+  geom_hline(aes(yintercept=smap_mean), size=1, color='black', linetype=2)+
+  geom_hline(yintercept=c(smap_mean-smap_SE2, smap_mean+smap_SE2), 
+             color='red', linetype=2)+
+  theme(axis.text.x = element_text(angle=75, hjust=1))
+
+```
+
+#### __Summary/Analysis:__
+
+In all three groups there are airports well outside of the expected proportion of delays based on the overall mean. Going back to our motivation for exploring this variable in the first place, let's dig deeper and try and see why some airports might have proportions so far away from the mean. What comes to mind first is weather. We of course have `WeatherDelay` as an obvious measure but this is post-de-facto record of the delay and the aim is probabilistic prediction. Airports are a likely covariate of weather so let's look for sign that that might be the case. 
+
+Elevation and latitude are good candidates as indicators of delay causing inclement weather.
+
+```{r}
+# group, select and summarize data by origin and elevation
+flights.orn_elev <- flights%>%
+  group_by(Origin, elevation_ft)%>%
+  summarise(d_prop=mean(Delay))
+
+
+# plot of departure airport by elevation by delay proportion
+ggplot(data=flights.orn_elev, aes(x=elevation_ft, y=d_prop))+
+  geom_point()+
+  geom_smooth(method='lm', se=T)
+
+fit <- lm(elevation_ft~d_prop, flights.orn_elev)
+summary(fit)
+```
+
+#### __Summary/Analysis:__
+
+There's no statistically significant relationship between these variables.
+
+
+```{r}
+# group, select and summarize data by origin and latitude
+flights.orn_lat <- flights%>%
+  group_by(Origin, lat)%>%
+  summarise(d_prop=mean(Delay))
+
+# plot of departure airport by latitude by delay proportion
+ggplot(data=flights.orn_lat, aes(x=lat, y=d_prop))+
+  geom_point()+
+  geom_smooth(method='lm', se=T)
+
+# test linear model
+fit <- lm(d_prop~lat,data = flights.orn_lat)
+summary(fit)
+```
+
+
+#### __Summary/Analysis:__ 
+
+Likewise here, the relationship between latitude and delay proportion is not statistically significant. 
+
+What stands out in both of the plots is the single observation at the uppermost range of the panel with a proportion of delays at 1.0, which would mean that 100% of the flights out of that airport were delayed in 2008. This seems unlikely and deserves further investigation.
+
+```{r}
+# get observation with 1.0 proportion of delays
+flights.orn_lat[flights.orn_lat$d_prop==1,]
+```
+
+The IATA code corresponds to Pueblo Memorial Airport an example belonging to our small airports classification. Let's look at all the flights out of the airport to see if in fact they were all delayed.
+
+```{r}
+# get all outgoing flights, PUB
+flights[flights$Origin=="PUB",]
+```
+
+There is record of only one flight (which was delayed explaining the proportion in the plots), yet the Federal Aviation Administration (FAA) recorded 4,345 emplanements, or boarding passengers, in 2008, far more than fit on a single flight. Why then the discrepency between our data and the FAA records. Keep in mind that PUB is a small airport with low flight volume and that we chose to randomly sample from the full 2008 data set. In all likelihood, the small number of flights out of PUB and our small sample proportion resulted in a single observation from this airport, which happened to be delayed. There are a couple solutions: we could eliminate the observation with some confidence that it wouldn't affect our results significantly since we our focusing more on larger airports, or deliberately take more samples from the full data set from this particular airport. 
+
+* * *
+
+So far we've looked at how flight origin labels in a graphical context that highlights flight volume and proportions of total flights delayed. But the factor is essentially geographical data and plotting them in that context while still coding for flight volume and other variables might lend them the space necessary for otherwise overlooked patterns to standout.
+
+
+```{r}
+# load map data for US and states
+states <- map_data('state')
+usa <- map_data('usa')
+
+# create base map of US to plot airport data onto
+base_map <- ggplot() +
+  geom_polygon(data=states, aes(x=long, y=lat, group=group), color='grey70',
+               fill='azure2') 
+```
+
+
+Let's look at the airports plotted on basemap.
+
+```{r}
+# group and select departure airport (Origin) data
+origin_airports <- flights%>%
+  group_by(Origin, lat, long, type)%>%
+  summarise(d_prop=mean(Delay))%>%
+  arrange(Origin, lat, long, type, d_prop)
+
+# map airports onto base map
+base_map +
+  geom_point(data=origin_airports, aes(x=long, y=lat), color='blue') +
+  coord_map()
+```
+
+Let's add more dimension to our plot by including data for the variable `type` which after we cleaned the data ended up encoding the size of the airport.
+
+
+
+```{r}
+# US map without data points
+base_map +
+  # plot airports using origin data, since origin and destination airport data sets 
+  # are very nearly identical.
+  geom_point(data = origin_airports, aes(x=long, y=lat, color=type, size=d_prop))+
+  scale_color_discrete()+
+  coord_map()
+```
+
+#### __Summary/Analysis:__ 
+
+It's difficult to detect any meaningful pattern in the geographical plot. It looks like there might be some contrast in delay proportion regionally for example between the Mountain West and the Northeast. Coastal airports seem to have higher delay rates, too. 
+
+Let's now include the first variable we looked at, `Month`, into the plot. Recalling from our focus on `Month` that December showed the highest delay proportion and September the lowest. We'll compare geographic plots of those two months
+
+```{r}
+# group and select departure airport (Origin) data by Month
+origin_airports_mnth <- flights%>%
+  group_by(Month, Origin, lat, long, type)%>%
+  summarise(d_prop=mean(Delay))%>%
+  arrange(Origin, lat, long, type, d_prop)
+
+origin_airports_mnth
+
+# geographic plot of origin airports by size and delay proprotion facet by month
+dec_map <- base_map+
+  geom_point(data=subset(origin_airports_mnth, Month==12), 
+             aes(x=long, y=lat, color=type, size=d_prop))+
+  scale_color_discrete()
+
+sept_map <- base_map+
+  geom_point(data=subset(origin_airports_mnth, Month==9), 
+             aes(x=long, y=lat, color=type, size=d_prop))+
+  scale_color_discrete()
+
+sept_map
+summary(subset(origin_airports_mnth, Month==9)$d_prop)
+
+dec_map
+summary(subset(origin_airports_mnth, Month==12)$d_prop)
+
+```
+
+#### __Summary/Analysis:__ 
+
+The two plots show strong variation between the two months but consistently over the geographic extent of the maps, suggesting that delays are not closely associated to region.
+
+## Predictive Model:
+
+Having examined the dimensions and distributions of the variables most intuitively relevant to our guiding questions, we gained a better sense of our data while at the same time removing outliers, generating new variables, and appropriately subsetting our data. We then moved to examining the relationship between the variables we've selected and our guiding question on what's behind flight delays. 
+
+Next, we'll put our insights to work in exploring the predictive power of the variables we've explored. We'll look at two of the variables to see what proportion of the variance of `Delay` they explain. Two of the variables, `DayofYear` and `Origin` involve a large number of levels and thus coefficients and will be left out of this part of the investigation.
+
+
+```{r}
+# create full linear regression model for Delay~Month
+fit_delay_month <- lm(Delay~Month_Name, data=flights)
+
+# stats
+summary(fit_delay_month)
+```
+
+The coefficients from the model accord with what we found previously for this model. The month of December has the largest coefficient meaning it has a strong influence on the probability of a delay relative to other months. Suprisingly, though, this variable explains very little of the overall variation in `Delay`, only around 2%, in fact.
+
+Let's look at a regression model with the airline carriers as the explanatory variable.
+
+```{r}
+# create full linear regression model for Delay~CarrierName
+fit_delay_carrier <- lm(Delay~CarrierName, data=flights)
+
+# stats
+summary(fit_delay_carrier)
+```
+
+Here likewise we could have predicted the distribution of coefficients from our earlier exploration. The airline carriers that had statistically significant delay proportions in our earlier graphs have the steepest coefficients in the regression model. Still, the variable explains only a minute proportion of the variation in `Delay`. 
+
+## Final Plots
+
+#### Plot 1:
+
+```{r, out.width="900px"}
+# final plot #1
+# subset data
+flights.delays2 <- flights[flights$Delay==1,]
+
+# density plot of unweighted delay counts for large aiports
+base_map+
+  geom_point(data=subset(origin_airports_mnth, Month==12 & type=="large_airport"), 
+             aes(x=long, y=lat, size=d_prop), color='grey25')+
+  labs(title="Delay Proportions for Large Airports")+
+  theme(plot.title = element_text(angle=0, hjust=0.5, size=16),
+        panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank())
+  
+
+
+
+```
+
+__Description:__
+
+The plot shows the proportion of departure delays at large airports with plot size. The plot clearly shows that while there are a handful of airports with noticeably smaller delay proportions, there is no clear geographic pattern in variance, for example by region or latitude. This reinforces our earlier findings that incredibly weather is not a strong correlate with delays. 
+
+Let's look at the correlative factors for the three geographic measures we have for airports in our data set.
+
+```{r}
+# create linear regression model using geographic variables
+fit_plot1 <- glm(Delay~lat+long+elevation_ft, data=flights)
+
+# get relational stats
+cat("AIC = ", summary(fit_plot1)$aic)
+cat("\nMcFadden R2 = ", pR2(fit_plot1)["McFadden"])
+```
+
+Both the AIC and the McFadden R-squared (an logistic analog of R-squared used in linear regression) show that the model of `Delay` as a function of our three geographic variables yields a poor model. Both the plot and the statistics show that geography, counterintuitively, is not a good predictor or delays.
+
+#### Plot 2:
+
+```{r, warning=FALSE, out.width="900px"}
+# plots of flight volume by month and proportion of delays
+p1 <- ggplot(data=flights)+
+  geom_histogram(aes(x=Month), stat='count', fill='grey70')+
+  stat_count(geom = 'text', aes(x=Month, label=..count..), vjust=1.5)+
+  scale_x_continuous(breaks=seq(1,12,1))+
+  labs(title="Monthly Variation in Flight Volume and Delay Proportion", 
+       y="Flight Volume")+
+  theme(panel.background = element_blank(),
+        plot.title = element_text(size=18, hjust=0.5),
+        axis.title.x = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+
+
+p2 <- ggplot(data=flights, aes(x=Month, y=Delay))+
+  geom_point(stat='summary', fun.y='mean',
+            color='orange', size=2)+
+  geom_line(stat='summary', fun.y='mean',
+            color='orange', size=1.5)+
+  stat_summary(geom = 'text', aes(x=Month, label=round(..y.., 3)), 
+               fun.y='mean', size=4)+
+  scale_x_continuous(limits=c(0.5, 12.5), breaks=seq(1,12,1), labels=month.abb)+
+  scale_y_continuous(breaks=seq(0, 0.30, 0.05), labels=seq(0,0.3,0.05))+
+  labs(y="Delay Proportion")+
+  theme(panel.background = element_blank(),
+        panel.grid.major.x = element_line(color='grey75', size=0.5),
+        axis.text.x = element_text(size=10),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank())
+
+grid.arrange(p1, p2, ncol=1)
+
+
+```
+
+__Description:__
+
+The plot shows the near-uniform distribution of flight volumes over the proportion of flights delayed, both by month. The plot clearly shows that there is no positive association between delays and flight volume. At the same time a multimodal distinct wave-like distribution can be seen across all delay types plotted by month. This suggests that where `Month` and flight volume were not correlated, `Month` and have a strong association with `Delay`.
+
+### Plot 3:
+
+```{r, out.width="900px"}
+# group and gather delay type prop by month
+delay_type_props <- flights%>%
+  group_by(Month)%>%
+  summarise(carrier=length(which(CarrierDelay>0 & 
+                                 !is.na(CarrierDelay)))/length(CarrierDelay),
+            weather=length(which(WeatherDelay>0 & 
+                                 !is.na(WeatherDelay)))/length(WeatherDelay),
+            nas=length(which(NASDelay>0 & !is.na(NASDelay)))/length(NASDelay),
+            security=length(which(SecurityDelay>0 & 
+                                  !is.na(SecurityDelay)))/length(SecurityDelay),
+            lateplane=length(which(LateAircraftDelay>0 &
+                          !is.na(LateAircraftDelay)))/length(LateAircraftDelay))
+
+delay_type_props <- melt(delay_type_props, id.vars="Month")
+
+# line plot of delay types
+ggplot(data=delay_type_props)+
+  geom_line(aes(x=Month, y=value, color=variable), stat='identity', size=1)+
+  labs(title="Monthly Delay Proportions by Type", x="", y="Delay Proportion")+
+  scale_x_continuous(limits=c(1,12), breaks=1:12, labels=month.abb)+
+  scale_y_continuous(limits=c(0,0.2), breaks=seq(0,0.2, 0.025))+
+  scale_color_discrete("Delay Type")+
+  theme(plot.title = element_text(size=18, hjust=0.5),
+        panel.grid = element_blank(),
+        panel.grid.major.x = element_line(color='white'),
+        axis.line = element_line(size=0.5, color='grey50'))
+
+
+```
+
+__Description:__
+
+This plot shows the proportion of delays by month for each of the five delay types recorded in the data set. The proportions all are congruent showing the same multimodal distribution that we saw in Plot #2, suggesting a common explanation or cause behind them that is closely associated to `Month` or seasonality. We eleminated flight volume as the lurking variable behind this trend, but passenger volume still needs to be explored. The plot also reiterates the surprisingly low proportion of delays,irregardless of `Month`, that are attributable to weather.
+
+
+
+## Reflection
+
+The data set we chose was large enough that we had to subset it to be able to work with it efficiently. Our analysis required that we consult complementary data sources and aggregate into the original data several additional variables. Most of the variables we worked with as explanatory on the response variable `Delay`.
+
+The analysis process began by choosing a response variable as the focus of our exploration and then carefully examining its distributions to arrive at a clear measure and 
+
+The trends that we suspected going into the investigation, that delays are associated to seasonal and airline variables, for example, were confirmed. At the same time, we discovered that the reasons for these relationships were not what we had intuited, for instance weather and flight volume did not in the end show a clear relationship to flight delays, at least not directly. We discovered an overarching pattern across most of the variables that we examined in which there was a common variation in delay proportion across the months of the year. From this we extrapolated that the variable `Month_Name` would be strongly predictive of `Delay`, however, this explanatory variable and the others we explored while statistically significant, each explained less than 10% of the variation in `Delay`.
+
+Because the EDA did not yield a closely associated explanatory variable or group of variables for `Delay`, further investigation is warrented. Some directions that might take include aggregating average weather patterns by day of the year and airport, creating a quantative variable to measure the effect of arrival delays on departure delays, and gathering data on passenger volume instead of assuming it to be constant.
+
